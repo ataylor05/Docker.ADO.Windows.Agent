@@ -1,0 +1,50 @@
+trigger:
+- master
+
+#pool: aks-windows
+
+pool:
+  vmImage: 'windows-latest'
+
+variables:
+- name: KeyVaultName
+  value: ataylor-ado-pipelines
+- name: ImageName
+  value: ado-windows-agent
+- name: ImageTag
+  value: "1.0"
+- name: AcrName
+  value: ataylorregistry
+
+steps:
+- task: AzureKeyVault@1
+  displayName: 'Get Secrets from KeyVault'
+  inputs:
+    azureSubscription: 'AKS'
+    KeyVaultName: 'ataylor-ado-pipelines'
+    SecretsFilter: 'ado-pat,acr-username,acr-password'
+    RunAsPreJob: false
+
+- task: qetza.replacetokens.replacetokens-task.replacetokens@3
+  displayName: 'Replace tokens in Dockerfile'
+  inputs:
+    rootDirectory: '$(System.DefaultWorkingDirectory)/Windows'
+    targetFiles: '**/Dockerfile'
+
+- task: CmdLine@2
+  displayName: 'Build image'
+  inputs:
+    script: |
+      docker build -t $(AcrName).azurecr.io/$(ImageName):$(ImageTag) --build-arg ADO_PAT=$(ado-pat) .
+    workingDirectory: '$(System.DefaultWorkingDirectory)/Windows'
+
+- task: AzureCLI@2
+  displayName: 'Push image to Azure Container Registry'
+  inputs:
+    azureSubscription: 'AKS'
+    scriptType: 'ps'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      docker login $(AcrName).azurecr.io --username $(acr-username) --password $(acr-password)
+      docker push $(AcrName).azurecr.io/$(ImageName):$(ImageTag)
+    workingDirectory: '$(System.DefaultWorkingDirectory)/Windows'
